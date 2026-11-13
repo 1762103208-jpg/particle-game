@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>粒子特效游戏</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a1a;
+  overflow: hidden;
+  font-family: 'Segoe UI', sans-serif;
+  cursor: crosshair;
+  user-select: none;
+}
+canvas { display: block; }
+#ui {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  color: #fff;
+  z-index: 10;
+}
+#ui h1 {
+  font-size: 24px;
+  background: linear-gradient(135deg, #00f5ff, #ff00e5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+#ui p {
+  font-size: 13px;
+  color: #8888aa;
+  line-height: 1.8;
+}
+#score {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  color: #fff;
+  font-size: 28px;
+  font-weight: bold;
+  z-index: 10;
+}
+#score span {
+  background: linear-gradient(135deg, #00f5ff, #ff00e5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+#combo {
+  position: fixed;
+  top: 65px;
+  right: 20px;
+  color: #ffaa00;
+  font-size: 16px;
+  z-index: 10;
+}
+#controls {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  display: flex;
+  gap: 10px;
+  z-index: 10;
+}
+.btn {
+  padding: 10px 20px;
+  border: 1px solid #334;
+  background: rgba(255,255,255,0.05);
+  color: #aaf;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s;
+}
+.btn:hover {
+  background: rgba(100,100,255,0.2);
+  border-color: #66f;
+}
+.btn.active {
+  background: rgba(100,100,255,0.3);
+  border-color: #88f;
+  color: #fff;
+}
+#fps {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  color: #445;
+  font-size: 12px;
+  z-index: 10;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="ui">
+  <h1>✨ 粒子特效游戏</h1>
+  <p>🖱️ 点击/拖动 → 产生粒子爆炸<br>
+     🎯 飞行的光球 → 碰撞得分<br>
+     ⌨️ 1-4 切换颜色主题 | 空格 → 清屏</p>
+</div>
+
+<div id="score">得分: <span id="scoreVal">0</span></div>
+<div id="combo"></div>
+
+<div id="controls">
+  <button class="btn active" onclick="setTheme(0)">🌈 彩虹</button>
+  <button class="btn" onclick="setTheme(1)">🔥 烈焰</button>
+  <button class="btn" onclick="setTheme(2)">🌊 深海</button>
+  <button class="btn" onclick="setTheme(3)">🌸 樱花</button>
+</div>
+
+<div id="fps"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- 颜色主题 ---
+const themes = [
+  { name: '彩虹', colors: ['#ff0055','#ff6600','#ffee00','#00ff66','#00ccff','#8800ff','#ff00cc'] },
+  { name: '烈焰', colors: ['#ff0000','#ff4400','#ff8800','#ffcc00','#ff6600','#ff2200'] },
+  { name: '深海', colors: ['#003366','#006699','#0099cc','#00ccff','#66ffff','#004488'] },
+  { name: '樱花', colors: ['#ff99bb','#ff6699','#ffccdd','#ffaacc','#ff4488','#ffeef2'] },
+];
+let currentTheme = 0;
+
+function randColor() {
+  const c = themes[currentTheme].colors;
+  return c[Math.floor(Math.random() * c.length)];
+}
+
+function setTheme(i) {
+  currentTheme = i;
+  document.querySelectorAll('.btn').forEach((b, idx) => b.classList.remove('active'));
+  document.querySelectorAll('.btn')[i].classList.add('active');
+}
+
+// --- 粒子系统 ---
+class Particle {
+  constructor(x, y, vx, vy, life, size, color, type) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.life = this.maxLife = life;
+    this.size = size;
+    this.color = color;
+    this.type = type || 'normal'; // normal | trail | sparkle | ring
+    this.gravity = type === 'sparkle' ? 0.02 : 0.05;
+    this.drag = 0.98;
+    this.rot = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.2;
+  }
+
+  update() {
+    this.vx *= this.drag;
+    this.vy *= this.drag;
+    this.vy += this.gravity;
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
+    this.rot += this.rotSpeed;
+  }
+
+  draw() {
+    const alpha = Math.max(0, this.life / this.maxLife);
+    const size = this.size * (0.3 + 0.7 * alpha);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+
+    if (this.type === 'sparkle') {
+      // 星形粒子
+      ctx.fillStyle = this.color;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = this.color;
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const angle = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+        const r = i === 0 ? size : size;
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else if (this.type === 'ring') {
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 2 * alpha;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = this.color;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 2 * (1 - alpha + 0.5), 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // 发光圆点
+      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+      gradient.addColorStop(0, this.color);
+      gradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// --- 光球 (目标) ---
+class Orb {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    const side = Math.floor(Math.random() * 4);
+    if (side === 0) { this.x = -30; this.y = Math.random() * H; }
+    else if (side === 1) { this.x = W + 30; this.y = Math.random() * H; }
+    else if (side === 2) { this.x = Math.random() * W; this.y = -30; }
+    else { this.x = Math.random() * W; this.y = H + 30; }
+
+    const angle = Math.atan2(H / 2 - this.y, W / 2 - this.x) + (Math.random() - 0.5) * 1.5;
+    const speed = 1 + Math.random() * 2.5;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.size = 15 + Math.random() * 20;
+    this.color = randColor();
+    this.pulse = Math.random() * Math.PI * 2;
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.pulse += 0.05;
+
+    // 拖尾
+    if (Math.random() < 0.5) {
+      particles.push(new Particle(
+        this.x, this.y,
+        (Math.random() - 0.5) * 1, (Math.random() - 0.5) * 1,
+        20 + Math.random() * 20,
+        3 + Math.random() * 4,
+        this.color, 'normal'
+      ));
+    }
+
+    if (this.x < -60 || this.x > W + 60 || this.y < -60 || this.y > H + 60) {
+      this.reset();
+    }
+  }
+
+  draw() {
+    const s = this.size + Math.sin(this.pulse) * 5;
+    ctx.save();
+    // 外圈光晕
+    const glow = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, s * 2.5);
+    glow.addColorStop(0, this.color + '66');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, s * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    // 核心
+    const core = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, s);
+    core.addColorStop(0, '#ffffff');
+    core.addColorStop(0.3, this.color);
+    core.addColorStop(1, 'transparent');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  checkHit(mx, my) {
+    const dx = mx - this.x;
+    const dy = my - this.y;
+    return Math.sqrt(dx * dx + dy * dy) < this.size + 20;
+  }
+}
+
+// --- 游戏状态 ---
+let particles = [];
+let orbs = [];
+let score = 0;
+let combo = 0;
+let lastHit = 0;
+let mouseX = 0, mouseY = 0;
+let isDown = false;
+let frameCount = 0;
+let fps = 60;
+let lastFpsTime = performance.now();
+
+// 创建光球
+for (let i = 0; i < 5; i++) orbs.push(new Orb());
+
+// --- 爆炸效果 ---
+function explode(x, y, count, speed, color) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const v = Math.random() * speed;
+    const isSparkle = Math.random() < 0.2;
+    particles.push(new Particle(
+      x, y,
+      Math.cos(angle) * v,
+      Math.sin(angle) * v,
+      40 + Math.random() * 60,
+      2 + Math.random() * 6,
+      color || randColor(),
+      isSparkle ? 'sparkle' : 'normal'
+    ));
+  }
+  // 冲击波环
+  particles.push(new Particle(x, y, 0, 0, 30, 20, color || randColor(), 'ring'));
+}
+
+function hitOrb(orb) {
+  const now = Date.now();
+  if (now - lastHit < 2000) combo++;
+  else combo = 1;
+  lastHit = now;
+
+  const points = 10 * combo;
+  score += points;
+  document.getElementById('scoreVal').textContent = score;
+
+  const comboEl = document.getElementById('combo');
+  if (combo > 1) {
+    comboEl.textContent = `🔥 连击 x${combo} (+${points})`;
+    comboEl.style.opacity = 1;
+  }
+
+  explode(orb.x, orb.y, 60, 8, orb.color);
+  orb.reset();
+}
+
+// --- 事件 ---
+canvas.addEventListener('mousedown', e => {
+  isDown = true;
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  explode(mouseX, mouseY, 30, 6);
+});
+
+canvas.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  if (isDown) {
+    particles.push(new Particle(
+      mouseX, mouseY,
+      (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4,
+      30 + Math.random() * 30,
+      2 + Math.random() * 5,
+      randColor(), Math.random() < 0.3 ? 'sparkle' : 'normal'
+    ));
+    // 检查拖动碰撞
+    for (const orb of orbs) {
+      if (orb.checkHit(mouseX, mouseY)) hitOrb(orb);
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', () => isDown = false);
+canvas.addEventListener('mouseleave', () => isDown = false);
+
+// 触摸支持
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  isDown = true;
+  const t = e.touches[0];
+  mouseX = t.clientX; mouseY = t.clientY;
+  explode(mouseX, mouseY, 30, 6);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouseX = t.clientX; mouseY = t.clientY;
+  if (isDown) {
+    particles.push(new Particle(
+      mouseX, mouseY,
+      (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4,
+      30 + Math.random() * 30,
+      2 + Math.random() * 5,
+      randColor(), Math.random() < 0.3 ? 'sparkle' : 'normal'
+    ));
+    for (const orb of orbs) {
+      if (orb.checkHit(mouseX, mouseY)) hitOrb(orb);
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => isDown = false);
+
+document.addEventListener('keydown', e => {
+  if (e.key >= '1' && e.key <= '4') setTheme(parseInt(e.key) - 1);
+  if (e.key === ' ') {
+    e.preventDefault();
+    particles = [];
+    explode(W / 2, H / 2, 100, 10);
+  }
+});
+
+// --- 主循环 ---
+function gameLoop() {
+  // 淡出背景 (拖尾效果)
+  ctx.fillStyle = 'rgba(10, 10, 26, 0.15)';
+  ctx.fillRect(0, 0, W, H);
+
+  // 更新光球
+  for (const orb of orbs) {
+    orb.update();
+    orb.draw();
+  }
+
+  // 粒子自动碰撞检测
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.update();
+    if (p.life <= 0) {
+      particles.splice(i, 1);
+      continue;
+    }
+    // 粒子碰撞光球
+    if (p.type === 'normal' && p.size > 3) {
+      for (const orb of orbs) {
+        if (orb.checkHit(p.x, p.y)) {
+          hitOrb(orb);
+          break;
+        }
+      }
+    }
+    p.draw();
+  }
+
+  // 限制粒子数量
+  if (particles.length > 2000) {
+    particles.splice(0, particles.length - 2000);
+  }
+
+  // 环境粒子
+  if (Math.random() < 0.1 && particles.length < 500) {
+    particles.push(new Particle(
+      Math.random() * W, Math.random() * H,
+      (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5,
+      100 + Math.random() * 100,
+      1 + Math.random() * 2,
+      randColor(), 'normal'
+    ));
+  }
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime > 1000) {
+    fps = frameCount;
+    frameCount = 0;
+    lastFpsTime = now;
+    document.getElementById('fps').textContent = `FPS: ${fps} | 粒子: ${particles.length}`;
+  }
+
+  // 连击衰减
+  if (Date.now() - lastHit > 3000 && combo > 0) {
+    combo = 0;
+    document.getElementById('combo').style.opacity = 0;
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
